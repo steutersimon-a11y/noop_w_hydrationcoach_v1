@@ -1,6 +1,9 @@
 import SwiftUI
 import StrandDesign
 import StrandAnalytics
+#if os(iOS)
+import HydrationCoach
+#endif
 
 // MARK: - Hydration detail (MVP, opt-in, local-only)
 //
@@ -17,6 +20,9 @@ import StrandAnalytics
 struct HydrationView: View {
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var profile: ProfileStore
+    #if os(iOS)
+    @EnvironmentObject private var app: AppModel
+    #endif
 
     /// Today's running total (ml) + the 7-day history (oldest→newest), loaded off the gesture path and
     /// refreshed after each log. A reload key the taps bump so the `.task` re-reads the store.
@@ -42,7 +48,21 @@ struct HydrationView: View {
     @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
     private var cardOpacity: Double { max(0, min(1, Double(cardOpacityPercent) / 100)) }
 
-    private var goalML: Int { repo.hydrationGoalML(profileSex: profile.sex) }
+    private var goalML: Int {
+        #if os(iOS)
+        if app.hydrationCoach.settings.enabled { return app.hydrationCoach.settings.personalGoalML }
+        #endif
+        return repo.hydrationGoalML(profileSex: profile.sex)
+    }
+
+    private var goalGuidance: LocalizedStringKey {
+        #if os(iOS)
+        if app.hydrationCoach.settings.enabled {
+            return "Your personal target is a general wellness guide, not medical advice."
+        }
+        #endif
+        return "A simple goal that adjusts to your effort. General wellness guidance, not medical advice."
+    }
     private var fraction: Double { HydrationGoal.fraction(totalML: totalML, goalML: goalML) }
     private var percent: Int { min(100, Int((fraction * 100).rounded(.towardZero))) }
 
@@ -55,11 +75,14 @@ struct HydrationView: View {
                        topBackground: liquidScaffoldSky()) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 ringSection
+                #if os(iOS)
+                HydrationCoachSettingsView(coach: app.hydrationCoach, cardOpacity: cardOpacity)
+                #endif
                 logSection
                 entriesSection
                 historySection
                 todayTotalSection
-                Text("A simple goal that adjusts to your effort. General wellness guidance, not medical advice.")
+                Text(goalGuidance)
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -74,6 +97,7 @@ struct HydrationView: View {
             }
         }
         .task(id: reloadTick) { await reload() }
+        .onChangeCompat(of: repo.hydrationSeq) { _ in reloadTick &+= 1 }
         // #798 - edit a logged drink's amount.
         .sheet(item: $editingEntry) { entry in
             HydrationAmountSheet(title: "Edit drink", initialML: entry.amountMl) { newML in
@@ -408,12 +432,139 @@ struct HydrationView: View {
     private func reload() async {
         totalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
         history = await repo.hydrationHistory(days: 7)
-        entries = repo.hydrationEntries()
+        entries = await repo.hydrationEntries()
         // #949: `totalML` already includes this; read it separately so the drinks card can name where
         // the difference came from instead of leaving an unexplained gap between the ring and the list.
         importedML = await repo.hydrationImportedTotal(day: Repository.localDayKey(Date()))
     }
 }
+
+#if os(iOS)
+/// The coach uses the existing tracker's totals, editable drinks and HealthKit import. These controls
+/// only configure reminders; enabling notifications or dismissing one never records a drink.
+private struct HydrationCoachSettingsView: View {
+    @ObservedObject var coach: HydrationCoachController
+    let cardOpacity: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
+            Text("Hydration Coach").strandOverline()
+            Toggle("Enable Hydration Coach", isOn: Binding(
+                get: { coach.settings.enabled },
+                set: { enabled in
+                    var settings = coach.settings
+                    settings.enabled = enabled
+                    coach.updateSettings(settings)
+                }
+            ))
+            .tint(StrandPalette.accent)
+            .font(StrandFont.subhead)
+            .accessibilityHint("Optional reminders. Enabling the coach asks for notification permission.")
+
+            Text(verbatim: coach.status)
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+            amountControl("Daily target", keyPath: \.personalGoalML, range: 250...10_000, step: 250)
+            amountControl("Serving size", keyPath: \.servingML, range: 50...1_000, step: 50)
+            Stepper(value: valueBinding(\.intervalMinutes), in: 15...240, step: 15) {
+                settingLabel("Reminder interval", value: "\(coach.settings.intervalMinutes) min")
+            }
+            .accessibilityLabel("Reminder interval")
+            .accessibilityValue("\(coach.settings.intervalMinutes) min")
+
+            DatePicker("Start time", selection: timeBinding(\.startMinute), displayedComponents: .hourAndMinute)
+                .font(StrandFont.subhead)
+                .tint(StrandPalette.accent)
+                .environment(\.timeZone, Self.timeOfDayCalendar.timeZone)
+            DatePicker("End time", selection: timeBinding(\.endMinute), displayedComponents: .hourAndMinute)
+                .font(StrandFont.subhead)
+                .tint(StrandPalette.accent)
+                .environment(\.timeZone, Self.timeOfDayCalendar.timeZone)
+            explanation("The start and end times are on the same local day.")
+
+            Divider()
+            Text(verbatim: coach.notificationStatus)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            explanation("Wrist reminders are best effort and require WHOOP 4.0, a live Bluetooth connection and NOOP in the foreground. iOS notifications are the fallback when the app is suspended.")
+            explanation("After a wrist cue, double tap within two minutes to log one serving. Without a double tap, nothing is logged.")
+            explanation("Reminders pause during workouts and after your daily target. Your wake alarm is never changed.")
+        }
+        .padding(NoopMetrics.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NoopPanelSurface(cornerRadius: NoopMetrics.cardRadius, surfaceOpacity: cardOpacity))
+    }
+
+    private func amountControl(_ title: LocalizedStringKey,
+                               keyPath: WritableKeyPath<HydrationCoachSettings, Int>,
+                               range: ClosedRange<Int>, step: Int) -> some View {
+        Stepper(value: valueBinding(keyPath), in: range, step: step) {
+            settingLabel(title, value: "\(coach.settings[keyPath: keyPath]) ml")
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue("\(coach.settings[keyPath: keyPath]) millilitres")
+    }
+
+    private func settingLabel(_ title: LocalizedStringKey, value: LocalizedStringKey) -> some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+            Text(title)
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(value)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .monospacedDigit()
+        }
+    }
+
+    private func explanation(_ text: LocalizedStringKey) -> some View {
+        Text(text)
+            .font(StrandFont.footnote)
+            .foregroundStyle(StrandPalette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func valueBinding(_ keyPath: WritableKeyPath<HydrationCoachSettings, Int>) -> Binding<Int> {
+        Binding(get: { coach.settings[keyPath: keyPath] }, set: { value in
+            var settings = coach.settings
+            settings[keyPath: keyPath] = value
+            coach.updateSettings(settings)
+        })
+    }
+
+    private func timeBinding(_ keyPath: WritableKeyPath<HydrationCoachSettings, Int>) -> Binding<Date> {
+        Binding(get: {
+            let minute = coach.settings[keyPath: keyPath]
+            return Self.timeOfDayCalendar.date(bySettingHour: minute / 60, minute: minute % 60,
+                                               second: 0, of: Date(timeIntervalSinceReferenceDate: 0))
+                ?? Date(timeIntervalSinceReferenceDate: 0)
+        }, set: { date in
+            let parts = Self.timeOfDayCalendar.dateComponents([.hour, .minute], from: date)
+            let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+            var settings = coach.settings
+            // A single-day window always has a positive duration; moving either edge cannot invert it.
+            if keyPath == \.startMinute {
+                settings.startMinute = min(minute, settings.endMinute - 1)
+            } else {
+                settings.endMinute = max(minute, settings.startMinute + 1)
+            }
+            coach.updateSettings(settings)
+        })
+    }
+
+    /// These dates represent clock faces, not instants. A fixed day/zone lets the picker retain 02:30
+    /// even on the local spring-forward day; the schedule resolves the saved minutes in the local zone.
+    private static let timeOfDayCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+}
+#endif
 
 // MARK: - Amount sheet (#798) - edit a drink / set the custom size
 

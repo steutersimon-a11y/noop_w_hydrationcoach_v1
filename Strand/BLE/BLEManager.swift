@@ -5583,6 +5583,33 @@ public final class BLEManager: NSObject, ObservableObject {
         log("Alarm: requested current alarm time")
     }
 
+    /// Whether the opt-in iOS Hydration Coach can submit a haptic command on this WHOOP 4.0 link.
+    /// A genuine per-connection encrypted bond is required in addition to the actual command channel;
+    /// cached "bonded" identity alone is not proof a restored/reconnecting link can accept commands.
+    var canSendHydrationCoachHaptic: Bool {
+        Self.hydrationCoachHapticAllowed(family: selectedModel.deviceFamily,
+                                        commandChannelReady: commandChannelReady,
+                                        bonded: didBond && state.encryptedBond)
+    }
+
+    /// Pure policy seam used by the production gate above and app-target tests.
+    static func hydrationCoachHapticAllowed(family: DeviceFamily,
+                                           commandChannelReady: Bool, bonded: Bool) -> Bool {
+        family == .whoop4 && commandChannelReady && bonded
+    }
+
+    /// Submit the existing reversible pattern command without touching the waking firmware alarm.
+    /// True means only that a ready link accepted the write request, not that the motor fired. Do not
+    /// route through `buzzStrapOnce`: that helper also sends RUN_ALARM. Confirmation callers must
+    /// persist the water log successfully before invoking this same bounded cue.
+    @discardableResult
+    func buzzHydrationCoach() -> Bool {
+        guard canSendHydrationCoachHaptic else { return false }
+        send(.runHapticsPattern, payload: [2, 1, 0, 0, 0], writeType: .withResponse)
+        log("Hydration: haptic command submitted (delivery unconfirmed)")
+        return true
+    }
+
     /// One-shot user buzz (#921): the on-device-confirmed "vibrate the strap now" sequence.
     ///
     /// Uses RUN_HAPTICS_PATTERN (cmd 79) with patternId=2, 3 loops (the same pattern the official

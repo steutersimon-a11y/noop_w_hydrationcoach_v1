@@ -436,6 +436,86 @@
       "identity_sha256": "6aa52285ae46cf0ae75a690feee01765f9401825b6c9845c146163fdf5b2bb3e",
       "platform": "swift",
       "rationale": "A LOCAL binding inside the private v16 ECG decoder (#2847), not a static constant. The ledger's Swift rule treats any four-space `let` in a file-scope function as a candidate `static let`, which is how it finds file-scope constants without parsing, so a local in a top-level `private func` lands in the inventory. The Kotlin twin's equivalent is a local `val` in its own decodeWhoop5HistoricalV16, which the Kotlin rule never inventories because it matches `const val` only, and a Set-valued or object-valued local cannot be `const` in Kotlin at all. There is nothing to pair and nothing to change in either decoder."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-file",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift",
+      "identity_sha256": "a9dd63e85eec74b3ff4c0b73dfc0ab54b7b12caad72431c3ca45100c4e010704",
+      "platform": "swift",
+      "rationale": "Apple-native GRDB persistence adapter for the existing hydration tracker and the iOS-only phase-1 coach requested in CODEX_TASK.md. It atomically migrates Apple UserDefaults entry metadata and commits receipts with the existing metricSeries total. Android uses Room and cannot execute this GRDB/Swift adapter; shared hydration keys, imported-water semantics and physiological analytics are unchanged."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::hydrationLogEntries/2#1",
+      "identity_sha256": "d3fa198d2b3e0bd994c18661dd898c43475e037dc3f266e9a1d340d294d55e8b",
+      "platform": "swift",
+      "rationale": "Apple entry-list migration and read seam using a GRDB transaction over the existing local database. Its input is the pre-existing Apple UserDefaults JSON list; Android has no UserDefaults migration to perform and retains its Room-backed hydration implementation."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::addHydrationLogEntry/5#1",
+      "identity_sha256": "e7245d7276db7ca24319cb231fe21df938bccb217f92bf9dab9ad5b0910da46a",
+      "platform": "swift",
+      "rationale": "Apple-native GRDB transaction for an editable drink, iOS coach receipt and existing metricSeries total, including a transactional goal recheck. Android Room cannot call this Swift/GRDB adapter. This implements the explicit iOS-only phase-1 brief without changing hydration units, shared series keys or physiological calculations."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::updateHydrationLogEntry/4#1",
+      "identity_sha256": "45a8f53752e6fa605c832c0860c0b86a7ae4360ebe6def0f2dd840a23171baa7",
+      "platform": "swift",
+      "rationale": "Apple-native GRDB edit/delete transaction for the migrated UserDefaults entry metadata and existing manual hydration row. It preserves iOS coach acknowledgment receipts and the HealthKit-imported row. Android uses a separate Room transaction implementation rather than this GRDB API."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::validHydrationDate/1#1",
+      "identity_sha256": "3e785224947aecccfad9725bdfb097531d1e73d98c1c71c3b27e1686daa0b488",
+      "platform": "swift",
+      "rationale": "Validates the representable range of Swift Date before this Apple GRDB adapter encodes entry timestamps as Int64 cursor-key metadata. It is a private native-serialization guard, not a physiological formula or a shared Android timestamp contract."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::hydrationEntryKey/2#1",
+      "identity_sha256": "a098a111ef0c86b4a845ea98b5276c76582f6f78ec75f7d5178b210a10e9b9c7",
+      "platform": "swift",
+      "rationale": "Private encoding of the existing Apple hydration UUID and Swift Date entry model into namespaced GRDB cursor metadata. Android cannot consume Swift Date/UUID or GRDB APIs and does not migrate Apple UserDefaults hydration entries; the canonical cross-platform hydration total remains unchanged."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::writeHydrationEntry/3#1",
+      "identity_sha256": "b48271e23b7ae76297c15133a7928557a9cb74d311a7b521575bee066b3e3481",
+      "platform": "swift",
+      "rationale": "Private GRDB Database write primitive for Apple hydration entry metadata inside the same SQLite transaction as its canonical total. Android uses Room rather than GRDB and has no Apple UserDefaults entry-migration step; this does not introduce a shared schema or metric definition."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::readHydrationEntries/2#1",
+      "identity_sha256": "c0d7702862ad240e0eb094f8f61954e343b92292adb40cf72dcf3a933cda6719",
+      "platform": "swift",
+      "rationale": "Private GRDB Row decoder reconstructing Apple hydration entries as Swift UUID and Date values from local cursor metadata. Android has no GRDB/Swift entry model to decode and keeps its existing Room path; the shared hydration total and imported-water keys are unchanged."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::migrateHydrationEntries/3#1",
+      "identity_sha256": "254d5c81150c20009868010ae0deae9815dc0b6ab449518ec1d1e03935a1da89",
+      "platform": "swift",
+      "rationale": "One-time migration of the Apple tracker's existing UserDefaults JSON drinks into its GRDB transaction domain. UserDefaults and this Swift entry model are unavailable on Android, whose hydration tracker uses its own platform persistence and has no such legacy migration."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::hydrationManualValue/2#1",
+      "identity_sha256": "91cfc4b52e77bca78d50778a9832d99ef0494fc429da770554e591dbea62ae8f",
+      "platform": "swift",
+      "rationale": "Private GRDB Database read primitive used inside the Apple hydration write transaction to update the existing canonical manual row atomically. Android Room cannot execute this GRDB adapter; the source id, series key and hydration units still match the Android tracker."
     }
   ]
 }

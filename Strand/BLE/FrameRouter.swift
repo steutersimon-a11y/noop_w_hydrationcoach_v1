@@ -938,6 +938,12 @@ public final class FrameRouter {
                     dispatchedDoubleTapEventTs.count - FrameRouter.dispatchedDoubleTapMemory)
             }
         }
+        // Keep the original callback and gesture behavior intact, while making event-time evidence
+        // available synchronously to consumers with a stricter acceptance window (Hydration Coach).
+        // Missing/nonpositive time must clear the previous value rather than lend it to this tap.
+        state.lastDoubleTapEventDate = ts.flatMap {
+            $0 > 0 ? Date(timeIntervalSince1970: TimeInterval($0)) : nil
+        }
         state.onDoubleTap?()
     }
 }

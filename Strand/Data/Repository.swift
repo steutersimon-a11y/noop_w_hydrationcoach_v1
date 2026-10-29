@@ -728,10 +728,14 @@ final class Repository: ObservableObject {
     /// `yyyy-MM-dd` in the device's local zone, matching how `DailyMetric.day` is stored.
     // `nonisolated` so pure callers off the main actor (e.g. the extracted `SleepModel.build`) can key a
     // day the SAME way `DailyMetric.day` is stored. Pure date→string; no actor state is touched.
-    private nonisolated static let dayKeyFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
-    }()
-    nonisolated static func localDayKey(_ date: Date) -> String { dayKeyFormatter.string(from: date) }
+    nonisolated static func localDayKey(_ date: Date, timeZone: TimeZone = NSTimeZone.default) -> String {
+        // A cached DateFormatter retains its original zone across travel. Resolve the current zone
+        // per call, with Gregorian components matching existing stored ISO day keys.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
 
     /// The hour the LOGICAL day rolls (04:00 local). Between midnight and this hour, "Today" stays put.
     nonisolated static let logicalDayRolloverHour = 4

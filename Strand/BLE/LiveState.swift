@@ -543,9 +543,14 @@ public final class LiveState: ObservableObject {
     /// encrypted bond → amber either way.
     public var connectionStatusIsIdle: Bool { (!connected && bonded) || (connected && !encryptedBond) }
 
-    /// Fired (live only) when the strap reports a DOUBLE_TAP gesture. Wired by AppModel to the
+    /// Fired once for a live/fresh-offload DOUBLE_TAP gesture. Wired by AppModel to the
     /// user's chosen action. Debounced in AppModel.
     public var onDoubleTap: (() -> Void)?
+    /// The strap's event time for the gesture currently being dispatched through `onDoubleTap`.
+    /// Set immediately before the callback on both live and fresh-offload paths; nil when missing or
+    /// invalid, so a consumer that requires evidence cannot accidentally reuse a previous event time.
+    /// This is metadata, not proof that an autonomous firmware-alarm dismissal reaches the app.
+    public var lastDoubleTapEventDate: Date?
     /// Fired (live only) when wrist-wear changes (true = put on, false = taken off).
     public var onWristChange: ((Bool) -> Void)?
     /// Fired (live only) when the strap reports it executed its firmware alarm

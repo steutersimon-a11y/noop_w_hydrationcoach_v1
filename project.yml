@@ -52,6 +52,8 @@ packages:
     path: Packages/WhoopStore
   StrandAnalytics:
     path: Packages/StrandAnalytics
+  HydrationCoach:
+    path: Packages/HydrationCoach
   StrandImport:
     path: Packages/StrandImport
   StrandDesign:
@@ -363,6 +365,7 @@ targets:
       - package: MarkdownUI
       - package: ZIPFoundation
       - package: PolarProtocol
+      - package: HydrationCoach
       - target: NOOPiOSWidgets
       # Embed the watchOS app so the iPhone app carries it (NOOP.app/Watch/NOOPWatch.app). A watch app
       # installs by riding inside its iOS companion; without this it would never reach a paired watch.

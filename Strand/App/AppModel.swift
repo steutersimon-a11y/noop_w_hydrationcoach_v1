@@ -62,6 +62,10 @@ final class AppModel: ObservableObject {
     let profile = ProfileStore()
     /// Behaviour settings: double-tap action, wear automation, zone coaching, smart alarm, illness watch.
     let behavior = BehaviorStore()
+    #if os(iOS)
+    /// Phase-one iOS hydration reminders; no firmware alarm is reserved or overwritten.
+    lazy var hydrationCoach = HydrationCoachController(model: self)
+    #endif
     /// On-device WHOOP-style recovery/strain/sleep computation from raw strap streams.
     let intelligence: IntelligenceEngine
 
@@ -1790,7 +1794,13 @@ final class AppModel: ObservableObject {
     ///
     /// A double tap rather than a single one because a strap takes knocks against bars and benches all
     /// session, and two deliberate taps are not something a rack does by accident.
-    var strapDoubleTapOverride: (@MainActor () -> Void)?
+    var strapDoubleTapOverride: (@MainActor () -> Void)? {
+        didSet {
+            #if os(iOS)
+            hydrationCoach.workoutContextChanged()
+            #endif
+        }
+    }
 
     private func handleDoubleTap() {
         let now = Date()
@@ -1805,6 +1815,14 @@ final class AppModel: ObservableObject {
             override()
             return
         }
+        #if os(iOS)
+        // A workout retains its configured gesture. Only a fresh, timestamped event inside an
+        // actually attempted hydration cue may claim it; replay/missing timestamps fail closed.
+        if activeWorkout == nil,
+           hydrationCoach.handleDoubleTap(eventDate: live.lastDoubleTapEventDate) {
+            return
+        }
+        #endif
         live.append(log: Self.stamped("Double-tap → \(behavior.doubleTapAction.label)"))
         runMacAction(behavior.doubleTapAction, shortcut: behavior.doubleTapShortcut)
     }
