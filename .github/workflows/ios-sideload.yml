@@ -20,7 +20,9 @@ jobs:
   ios:
     # External pull requests never receive a publishing token or create test releases.
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: macos-26
+    # Use the Intel pool when GitHub's macOS ARM runners cannot acquire jobs.
+    # Xcode 26 on this image still cross-compiles the iPhone arm64 app.
+    runs-on: macos-26-intel
     timeout-minutes: 40
     permissions:
       contents: write
