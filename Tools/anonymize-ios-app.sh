@@ -59,6 +59,8 @@ print(f"scrubbed {total} occurrence(s) across {files} file(s)")
 PY
 
 # Verify: no residual home-path bytes anywhere in the bundle.
-residual=$(grep -rac "$HOME" "$APP" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+# grep returns 1 when the bundle is clean; accept only that expected status so
+# pipefail still rejects read/tool errors instead of accepting a failed verification.
+residual=$({ grep -raFc -- "$HOME" "$APP" || [ "$?" -eq 1 ]; } | awk -F: '{s+=$NF} END {print s+0}')
 echo "residual home-path hits: ${residual:-0}"
 [ "${residual:-0}" -eq 0 ] && echo "✓ clean" || { echo "✗ residual paths remain" >&2; exit 1; }

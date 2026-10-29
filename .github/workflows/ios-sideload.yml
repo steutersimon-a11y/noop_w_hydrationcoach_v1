@@ -8,6 +8,8 @@ on:
       - '.github/workflows/ios-sideload.yml'
       - 'Tools/ios_sideload_source.py'
       - 'Tools/test_ios_sideload_source.py'
+      - 'Tools/anonymize-ios-app.sh'
+      - 'Tools/prepare-ios-sideload-app.sh'
 
 permissions:
   contents: read
@@ -31,6 +33,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Test sideload packaging helpers
+        working-directory: Tools
+        run: python3 -m unittest -v test_anonymize_ios_app test_ios_sideload_source
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
