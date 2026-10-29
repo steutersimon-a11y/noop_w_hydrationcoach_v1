@@ -1,0 +1,101 @@
+name: iOS sideload test build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ios-sideload.yml'
+      - 'Tools/ios_sideload_source.py'
+      - 'Tools/test_ios_sideload_source.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-sideload-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    # External pull requests never receive a publishing token or create test releases.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-26
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build iPhone Release app
+        run: >-
+          xcodebuild -scheme NOOPiOS -configuration Release -destination 'generic/platform=iOS'
+          -derivedDataPath build/ios-sideload
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          build
+      - name: Package and verify AltStore IPA
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_SHA=$(git rev-parse HEAD)
+          TAG="hydration-coach-${BUILD_SHA:0:12}"
+          APP=build/ios-sideload/Build/Products/Release-iphoneos/NOOP.app
+          test -d "$APP/PlugIns/NOOPWidgets.appex"
+          PACKAGE_DIR=$(mktemp -d)
+          mkdir -p "$PACKAGE_DIR/Payload" build/ios-distribution
+          cp -R "$APP" "$PACKAGE_DIR/Payload/"
+          APP="$PACKAGE_DIR/Payload/NOOP.app"
+          rm -rf "$APP/Watch"
+          # Preserve the original sideload flow: anonymous app + replaceable app/widget entitlements.
+          Tools/anonymize-ios-app.sh "$APP"
+          Tools/prepare-ios-sideload-app.sh "$APP"
+          IPA="$GITHUB_WORKSPACE/build/ios-distribution/NOOP-Hydration-Coach-${BUILD_SHA:0:12}.ipa"
+          (cd "$PACKAGE_DIR" && zip -qry "$IPA" Payload)
+          python3 Tools/ios_sideload_source.py --template altstore-source.json --ipa "$IPA" \
+            --repository "$GITHUB_REPOSITORY" --tag "$TAG" --commit "$BUILD_SHA" \
+            --output build/ios-distribution/altstore-hydration-source.json
+          (cd build/ios-distribution && shasum -a 256 *.ipa *.json > SHA256SUMS)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$BUILD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Retain verified sideload files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: NOOP-Hydration-Coach-${{ steps.package.outputs.sha }}
+          path: build/ios-distribution/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish isolated test download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.package.outputs.tag }}
+          BUILD_SHA: ${{ steps.package.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOTES="$RUNNER_TEMP/ios-sideload-notes.md"
+          cat > "$NOTES" <<EOF
+          iPhone Release build of the Hydration Coach from commit $BUILD_SHA.
+
+          Install the IPA with AltStore Classic or SideStore, or add this source:
+          https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/altstore-hydration-source.json
+
+          AltStore/SideStore signs the app with your own Apple ID. No developer identity is embedded.
+          Keep the widget extension enabled to preserve the requested App Group and widgets.
+
+          This uses NOOP's existing bundle identifier and may replace an installed NOOP. Back up data first.
+          WHOOP 4.0 motor behavior remains untested; wrist reminders require NOOP in the foreground.
+          Background reminders use local iOS notifications. See docs/HYDRATION_COACH.md in this commit.
+          EOF
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$BUILD_SHA" \
+            --prerelease --latest=false --title "NOOP Hydration Coach — iOS test ${BUILD_SHA:0:12}" \
+            --notes-file "$NOTES" build/ios-distribution/*.ipa \
+            build/ios-distribution/altstore-hydration-source.json build/ios-distribution/SHA256SUMS
+          echo "## iPhone download" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

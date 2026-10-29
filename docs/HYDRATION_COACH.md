@@ -2,6 +2,14 @@
 
 The phase-one coach is an opt-in addition to the existing Hydration tracker on this fork's iOS target. It uses the existing manual-water total, editable entries, history and Apple Health imported-water total. It does not infer that the wearer drank water from a timer, a notification, an alarm dismissal or a disconnection.
 
+## Install a fork test build
+
+The `iOS sideload test build` workflow produces a **device Release IPA**, separately from the Simulator-only build check. It follows the repository's existing sideload preparation: strip the embedded watch app, retain the widget extension, scrub builder paths, and embed replaceable ad-hoc capability signatures. AltStore Classic or SideStore performs the actual Apple-ID signing at installation; no Apple distribution identity or paid developer credential is needed to run this build workflow.
+
+Each successful build publishes an isolated `hydration-coach-<commit>` prerelease with the IPA, `SHA256SUMS` and `altstore-hydration-source.json`. Either download the IPA and select it using the sideloader's **+** button, or add the release asset URL ending in `altstore-hydration-source.json` as a source. A repository web-page URL is not an AltStore source. This one-build source points only to the fork's tested IPA; it does not change the original NOOP source or promise an ongoing update channel.
+
+The IPA uses NOOP's existing bundle identifier and can replace an existing installation. Back up NOOP data before switching builds. Keep the widget extension enabled when signing. Physical strap validation remains outstanding as listed below; successful packaging does not establish motor behavior.
+
 ## WHOOP 4.0 alarm boundary
 
 The checked-in WHOOP 4.0 `WhoopCommand.setAlarmPayload` is the captured revision-one alarm body: revision byte, UTC epoch, subseconds and haptic mode. It does not expose an independently verified alarm ID. `BLEManager.armStrapAlarm` is already the waking Smart Alarm's single arm/readback path. Neither that payload nor the existing readback establishes that a second independent hydration alarm can coexist with the wake alarm.
