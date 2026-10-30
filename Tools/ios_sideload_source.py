@@ -52,16 +52,18 @@ def make_source(template, ipa_path, repository, tag, commit, date=None):
     base = f"https://github.com/{repository}/releases/download/{quote(tag, safe='')}"
     download = f"{base}/{quote(ipa_path.name, safe='')}"
     description = (
-        f"NOOP Hydration Coach iOS test build, commit {commit}. "
+        f"NOOP Hydration Coach iOS build, commit {commit}. "
         "Sign with AltStore Classic or SideStore. Uses NOOP's existing app identifier, "
         "so it can replace an installed NOOP; back up existing data before switching. "
-        "Physical WHOOP 4.0 haptics and locked-phone behavior remain unverified."
+        "Wake time stays in NOOP's Alarms screen. The shared WHOOP 4.0 alarm supports a "
+        "wake-to-hydration-to-bedtime routine; following alarms require Bluetooth and iOS "
+        "background event delivery. Physical haptics remain unverified."
     )
     result.update({
-        "name": "NOOP Hydration Coach — test",
+        "name": "NOOP Hydration Coach",
         "identifier": f"com.noopapp.noop.altstore.hydration.{repository.lower().replace('/', '.').replace('_', '-')}.{tag}",
         "sourceURL": base + "/altstore-hydration-source.json",
-        "subtitle": "Personal iOS hydration-coach test build",
+        "subtitle": "Wake alarm and adaptive hydration routine",
         "description": description + " Based on the NOOP project: https://github.com/ryanbr/noop",
         "website": f"https://github.com/{repository}/releases/tag/{quote(tag, safe='')}",
         "news": [],

@@ -30,21 +30,50 @@ extension WhoopStore {
         }
     }
 
-    /// Commit a drink, its editable entry and (for a reminder) its durable receipt atomically.
-    /// `false` means an already acknowledged reminder or entry; callers must not buzz confirmation.
+    /// Explicit daytime drink gestures share the existing atomic entry/total/receipt transaction.
+    /// Their day-scoped receipt prevents replay after reconnect or correction; reaching the reminder
+    /// goal never discards water the wearer actually confirmed. The caller supplies one aggregated
+    /// glass/bottle entry, not separate entries for the two constituent double-tap events.
+    @discardableResult
+    public func addHydrationGestureEntry(_ entry: HydrationLogEntry, day: String,
+                                         legacyEntries: [HydrationLogEntry], receiptID: String,
+                                         additionalReceiptIDs: [String] = [],
+                                         timeZone: TimeZone = NSTimeZone.default) async throws -> Bool {
+        guard Self.validHydrationDate(entry.loggedAt) else { throw HydrationLogError.invalidEntry }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: entry.loggedAt)
+        let entryDay = String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+        let prefix = "hydration-gesture.\(day)."
+        guard day == entryDay,
+              ([receiptID] + additionalReceiptIDs).allSatisfy({ $0.hasPrefix(prefix) && $0.count > prefix.count }) else {
+            throw HydrationLogError.invalidEntry
+        }
+        return try await addHydrationLogEntry(entry, day: day, legacyEntries: legacyEntries,
+                                              reminderID: receiptID, additionalReceiptIDs: additionalReceiptIDs)
+    }
+
+    /// Commit a drink, its editable entry and its reminder/gesture receipts atomically.
+    /// `false` means an already acknowledged event or entry; callers must not buzz confirmation.
     /// A receipt is independent of the drink metadata so deleting a mistaken drink never re-arms it.
+    /// Every constituent gesture is consumed together; replay of a bottle's second tap cannot become
+    /// a new glass after reconnect. If any receipt was consumed, the entire overlapping credit is rejected.
     @discardableResult
     public func addHydrationLogEntry(_ entry: HydrationLogEntry, day: String,
                                      legacyEntries: [HydrationLogEntry], reminderID: String? = nil,
-                                     goalML: Int? = nil) async throws -> Bool {
+                                     goalML: Int? = nil, additionalReceiptIDs: [String] = []) async throws -> Bool {
         guard entry.amountMl > 0, Self.validHydrationDate(entry.loggedAt),
               !day.isEmpty, reminderID?.isEmpty != true,
+              additionalReceiptIDs.allSatisfy({ !$0.isEmpty }),
+              additionalReceiptIDs.isEmpty || reminderID != nil,
               goalML.map({ $0 > 0 }) != false else { throw HydrationLogError.invalidEntry }
+        let receiptIDs = Array(Set(([reminderID].compactMap { $0 }) + additionalReceiptIDs)).sorted()
         return try syncWrite { db in
             try Self.migrateHydrationEntries(day: day, legacyEntries: legacyEntries, in: db)
-            if let reminderID,
-               try Int.fetchOne(db, sql: "SELECT value FROM cursors WHERE name = ?",
-                                arguments: ["hydration:ack:" + reminderID]) != nil { return false }
+            for receiptID in receiptIDs {
+                if try Int.fetchOne(db, sql: "SELECT value FROM cursors WHERE name = ?",
+                                    arguments: ["hydration:ack:" + receiptID]) != nil { return false }
+            }
             let entries = try Self.readHydrationEntries(day: day, in: db)
             guard !entries.contains(where: { $0.id == entry.id }) else { return false }
             let current = try Self.hydrationManualValue(day: day, in: db)
@@ -59,9 +88,9 @@ extension WhoopStore {
             _ = try Self.upsertMetricSeries([MetricPoint(day: day, key: "hydration",
                                                      value: current + Double(entry.amountMl))],
                                         deviceId: "hydration", in: db)
-            if let reminderID {
+            for receiptID in receiptIDs {
                 try db.execute(sql: "INSERT INTO cursors (name, value) VALUES (?, ?)",
-                               arguments: ["hydration:ack:" + reminderID, Int(entry.loggedAt.timeIntervalSince1970)])
+                               arguments: ["hydration:ack:" + receiptID, Int(entry.loggedAt.timeIntervalSince1970)])
             }
             return true
         }

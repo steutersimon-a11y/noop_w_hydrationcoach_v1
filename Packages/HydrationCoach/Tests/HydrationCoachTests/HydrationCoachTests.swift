@@ -8,7 +8,7 @@ final class HydrationCoachTests: XCTestCase {
         return value
     }
     private func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
-    private let settings = HydrationCoachSettings(enabled: true)
+    private let settings = HydrationCoachSettings(enabled: true, endMinute: 1_290, intervalMinutes: 75)
     private var morning: Date { date("2026-10-29T07:30:00+01:00") }
 
     private func opened() -> (HydrationCoachSession, HydrationCoachReminder) {
@@ -35,8 +35,9 @@ final class HydrationCoachTests: XCTestCase {
         XCTAssertEqual(defaults.personalGoalML, 3_000)
         XCTAssertEqual(defaults.servingML, 250)
         XCTAssertEqual(defaults.startMinute, 450)
-        XCTAssertEqual(defaults.endMinute, 1_290)
-        XCTAssertEqual(defaults.intervalMinutes, 75)
+        XCTAssertEqual(defaults.bottleML, 500)
+        XCTAssertEqual(defaults.endMinute, 1_410)
+        XCTAssertEqual(defaults.intervalMinutes, 60)
         XCTAssertTrue(defaults.isValid)
         XCTAssertEqual(try JSONDecoder().decode(HydrationCoachSettings.self,
                        from: JSONEncoder().encode(defaults)), defaults)
@@ -62,14 +63,19 @@ final class HydrationCoachTests: XCTestCase {
         for value in [0, -1, 14, 241, Int.max] {
             var s = settings; s.intervalMinutes = value; variants.append(s)
         }
-        for pair in [(450, 450), (500, 400), (-1, 500), (450, 1_440)] {
-            var s = settings; s.startMinute = pair.0; s.endMinute = pair.1; variants.append(s)
+        for value in [-1, 1_440, Int.max] {
+            var s = settings; s.endMinute = value; variants.append(s)
         }
         var s = settings; s.personalGoalML = Int.max; variants.append(s)
         s = settings; s.servingML = 0; variants.append(s)
         for variant in variants {
             XCTAssertFalse(variant.isValid)
             XCTAssertTrue(HydrationCoachSchedule.reminders(on: morning, settings: variant,
+                                                          calendar: calendar).isEmpty)
+        }
+        for pair in [(450, 450), (500, 400), (-1, 500)] {
+            var s = settings; s.startMinute = pair.0; s.endMinute = pair.1
+            XCTAssertTrue(HydrationCoachSchedule.reminders(on: morning, settings: s,
                                                           calendar: calendar).isEmpty)
         }
     }

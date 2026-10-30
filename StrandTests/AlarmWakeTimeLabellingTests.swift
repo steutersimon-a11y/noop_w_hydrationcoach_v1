@@ -123,6 +123,40 @@ final class AlarmWakeTimeLabellingTests: XCTestCase {
                       "the funnel is where the gate belongs, so no readout can skip it")
     }
 
+    /// The shared slot can contain a drinking reminder while tomorrow's wake remains a preference.
+    /// Every legacy wake-only readout must therefore stop at the same ownership gate.
+    func testSharedHydrationAlarmSuppressesWakeOnlyReadouts() throws {
+        let src = try Self.alarmViewSource()
+        let start = try XCTUnwrap(src.range(of: "private func nextStrapAlarm(from now: Date = Date()) -> Date? {"))
+        let tail = src[start.upperBound...]
+        let end = try XCTUnwrap(tail.range(of: "\n    }"))
+        let body = String(tail[..<end.lowerBound])
+        XCTAssertTrue(body.contains("guard !sharedHydrationAlarmEnabled else { return nil }"),
+                      "a configured wake is not the stored next alarm while Hydration owns the slot")
+        XCTAssertTrue(src.contains("HydrationRoutineAlarmStatusView(coach: model.hydrationCoach)"),
+                      "Alarms must show the shared selection and its readback status")
+        XCTAssertTrue(src.contains("if !sharedHydrationAlarmEnabled {"),
+                      "standalone armed-wake wording must not describe a daytime hydration alarm")
+    }
+
+    /// Hydration has one bedtime editor and links back to the existing Alarms wake editor.
+    /// A second independent wake picker would allow the daily routine to start from another clock.
+    func testHydrationUsesTheExistingAlarmWakeEditor() throws {
+        let src = try Self.alarmViewSource(view: "HydrationView.swift")
+        let start = try XCTUnwrap(src.range(of: "private struct HydrationCoachSettingsView: View {"))
+        let tail = src[start.upperBound...]
+        let end = try XCTUnwrap(tail.range(of: "\n}"))
+        let controls = String(tail[..<end.lowerBound])
+        XCTAssertFalse(controls.contains("\\.startMinute"),
+                       "the coach must not own an independent editable wake time")
+        XCTAssertEqual(controls.components(separatedBy: "DatePicker(").count - 1, 1,
+                       "bedtime is the only clock-face setting owned by Hydration")
+        XCTAssertTrue(controls.contains("DatePicker(\"Bedtime\""))
+        XCTAssertTrue(controls.contains("router.openAlarms()"))
+        XCTAssertTrue(controls.contains("\\.servingML"))
+        XCTAssertTrue(controls.contains("\\.bottleML"))
+    }
+
     /// The hero is the first figure on the screen and it must not call the reminder's input "Wake".
     ///
     /// It sat above both cards, in the largest type on the page, labelling `wakeMinutes` as "Wake". A
@@ -244,10 +278,10 @@ final class AlarmWakeTimeLabellingTests: XCTestCase {
         var description: String { "SmartAlarmView.swift not reachable from \(path)" }
     }
 
-    private static func alarmViewSource(file: StaticString = #filePath) throws -> String {
+    private static func alarmViewSource(view: String = "SmartAlarmView.swift", file: StaticString = #filePath) throws -> String {
         var dir = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
         for _ in 0..<4 {
-            let candidate = dir.appendingPathComponent("Strand/Screens/SmartAlarmView.swift")
+            let candidate = dir.appendingPathComponent("Strand/Screens/\(view)")
             if FileManager.default.fileExists(atPath: candidate.path) {
                 return try String(contentsOf: candidate, encoding: .utf8)
             }

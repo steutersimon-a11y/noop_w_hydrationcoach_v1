@@ -456,10 +456,10 @@
     {
       "type": "platform_specific",
       "kind": "add-unpaired-function",
-      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::addHydrationLogEntry/5#1",
-      "identity_sha256": "e7245d7276db7ca24319cb231fe21df938bccb217f92bf9dab9ad5b0910da46a",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::addHydrationLogEntry/6#1",
+      "identity_sha256": "36ad8e10001c44852a0a8de0ad0d735876f9e394f370c36f7ffb475e866ee0a4",
       "platform": "swift",
-      "rationale": "Apple-native GRDB transaction for an editable drink, iOS coach receipt and existing metricSeries total, including a transactional goal recheck. Android Room cannot call this Swift/GRDB adapter. This implements the explicit iOS-only phase-1 brief without changing hydration units, shared series keys or physiological calculations."
+      "rationale": "Apple-native GRDB transaction for an editable drink, the existing metricSeries total and all constituent iOS gesture receipts. The extra parameter consumes each tap of a glass/bottle credit atomically so live/replay delivery cannot count the second tap again. Android Room cannot execute this Swift/GRDB adapter; canonical millilitre units, hydration series keys, imported-water separation and physiological calculations remain unchanged."
     },
     {
       "type": "platform_specific",
@@ -516,6 +516,14 @@
       "identity_sha256": "91cfc4b52e77bca78d50778a9832d99ef0494fc429da770554e591dbea62ae8f",
       "platform": "swift",
       "rationale": "Private GRDB Database read primitive used inside the Apple hydration write transaction to update the existing canonical manual row atomically. Android Room cannot execute this GRDB adapter; the source id, series key and hydration units still match the Android tracker."
+    },
+    {
+      "type": "platform_specific",
+      "kind": "add-unpaired-function",
+      "identity": "swift\u0000Packages/WhoopStore/Sources/WhoopStore/HydrationLogStore.swift::addHydrationGestureEntry/6#1",
+      "identity_sha256": "e942b43164babd6179c78d8f21670e0e41990b492dfb2cbce2b5b60f83875d80",
+      "platform": "swift",
+      "rationale": "Apple-native persistence adapter for the explicitly iOS-only hydration routine. It validates the Gregorian local event day and every day-scoped gesture receipt before reusing the existing GRDB entry/total/receipt transaction, allowing actual drinks above the reminder goal. Android has no WHOOP hydration gesture routine to persist and uses Room rather than GRDB. This does not add a shared schema or alter canonical hydration units, shared metricSeries keys, imported-water semantics or physiological analytics."
     }
   ]
 }

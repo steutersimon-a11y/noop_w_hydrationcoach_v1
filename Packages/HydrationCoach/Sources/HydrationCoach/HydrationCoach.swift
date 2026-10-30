@@ -1,31 +1,74 @@
 import Foundation
 
 /// Opt-in personal coaching, separate from the existing sex/effort goal when coaching is off.
-/// iOS phase 1 only: these are reminder preferences, not physiological hydration measurements.
+/// iOS only: these are reminder preferences, not physiological hydration measurements.
 public struct HydrationCoachSettings: Codable, Equatable {
     public static let storageKey = "noop.hydrationCoach.settings"
+    public static let schemaVersion = 2
     public var enabled: Bool
     public var personalGoalML: Int
     public var servingML: Int
+    public var bottleML: Int
+    // Compatibility with the original foreground coach only. The shared-alarm planner
+    // obtains its wake date exclusively from the existing Smart Alarm configuration.
     public var startMinute: Int
     public var endMinute: Int
     public var intervalMinutes: Int
 
     public init(enabled: Bool = false, personalGoalML: Int = 3_000, servingML: Int = 250,
-                startMinute: Int = 450, endMinute: Int = 1_290, intervalMinutes: Int = 75) {
+                bottleML: Int = 500, startMinute: Int = 450, endMinute: Int = 1_410,
+                intervalMinutes: Int = 60) {
         self.enabled = enabled
         self.personalGoalML = personalGoalML
         self.servingML = servingML
+        self.bottleML = bottleML
         self.startMinute = startMinute
         self.endMinute = endMinute
         self.intervalMinutes = intervalMinutes
     }
 
-    /// Same-day waking windows; invalid persisted values fail closed rather than scheduling a flood.
+    public var glassML: Int {
+        get { servingML }
+        set { servingML = newValue }
+    }
+
+    public var bedtimeMinute: Int {
+        get { endMinute }
+        set { endMinute = newValue }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, enabled, personalGoalML, servingML, bottleML, startMinute, endMinute, intervalMinutes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        personalGoalML = try values.decodeIfPresent(Int.self, forKey: .personalGoalML) ?? 3_000
+        servingML = try values.decodeIfPresent(Int.self, forKey: .servingML) ?? 250
+        bottleML = try values.decodeIfPresent(Int.self, forKey: .bottleML) ?? 500
+        startMinute = try values.decodeIfPresent(Int.self, forKey: .startMinute) ?? 450
+        endMinute = try values.decodeIfPresent(Int.self, forKey: .endMinute) ?? 1_410
+        intervalMinutes = try values.decodeIfPresent(Int.self, forKey: .intervalMinutes) ?? 60
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(Self.schemaVersion, forKey: .schemaVersion)
+        try values.encode(enabled, forKey: .enabled)
+        try values.encode(personalGoalML, forKey: .personalGoalML)
+        try values.encode(servingML, forKey: .servingML)
+        try values.encode(bottleML, forKey: .bottleML)
+        try values.encode(startMinute, forKey: .startMinute)
+        try values.encode(endMinute, forKey: .endMinute)
+        try values.encode(intervalMinutes, forKey: .intervalMinutes)
+    }
+
+    /// The actual wake date is validated separately against the existing Smart Alarm.
     public var isValid: Bool {
         (250...10_000).contains(personalGoalML) && (50...1_000).contains(servingML) &&
-        (0..<1_440).contains(startMinute) && (1..<1_440).contains(endMinute) &&
-        startMinute < endMinute && (15...240).contains(intervalMinutes)
+        (100...2_000).contains(bottleML) && (0..<1_440).contains(endMinute) &&
+        (15...240).contains(intervalMinutes)
     }
 }
 
@@ -34,6 +77,13 @@ public struct HydrationCoachReminder: Identifiable, Codable, Equatable {
     public let dayKey: String
     public let scheduledAt: Date
     public let expiresAt: Date
+
+    public init(id: String, dayKey: String, scheduledAt: Date, expiresAt: Date) {
+        self.id = id
+        self.dayKey = dayKey
+        self.scheduledAt = scheduledAt
+        self.expiresAt = expiresAt
+    }
 }
 
 /// Wall-clock cadence in the supplied local calendar, never fixed 86,400-second day arithmetic.
@@ -62,7 +112,8 @@ public enum HydrationCoachSchedule {
 
     public static func reminders(on date: Date, settings: HydrationCoachSettings,
                                  calendar: Calendar = .current) -> [HydrationCoachReminder] {
-        guard settings.enabled, settings.isValid else { return [] }
+        guard settings.enabled, settings.isValid, (0..<1_440).contains(settings.startMinute),
+              settings.startMinute < settings.endMinute else { return [] }
         let day = dayKey(for: date, calendar: calendar)
         func localTime(_ minute: Int, boundary: Bool = false) -> Date? {
             guard let time = calendar.date(bySettingHour: minute / 60, minute: minute % 60,

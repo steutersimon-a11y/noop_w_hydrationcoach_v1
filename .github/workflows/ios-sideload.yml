@@ -10,6 +10,11 @@ on:
       - 'Tools/test_ios_sideload_source.py'
       - 'Tools/anonymize-ios-app.sh'
       - 'Tools/prepare-ios-sideload-app.sh'
+      - 'Strand/**'
+      - 'StrandiOS/**'
+      - 'Packages/HydrationCoach/**'
+      - 'Packages/WhoopStore/**'
+      - 'project.yml'
 
 permissions:
   contents: read
@@ -97,11 +102,14 @@ jobs:
           Keep the widget extension enabled to preserve the requested App Group and widgets.
 
           This uses NOOP's existing bundle identifier and may replace an installed NOOP. Back up data first.
-          WHOOP 4.0 motor behavior remains untested; wrist reminders require NOOP in the foreground.
-          Background reminders use local iOS notifications. See docs/HYDRATION_COACH.md in this commit.
+          The shared WHOOP 4.0 firmware alarm runs wake, daytime hydration and bedtime handoff.
+          Wake time and weekdays remain in NOOP's existing Alarms screen.
+          Already-stored alarms can run while the phone is locked; following alarms require a BLE connection
+          and background event delivery. Physical motor behavior has not been tested in this build.
+          See docs/HYDRATION_COACH.md in this commit for operation and platform limits.
           EOF
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$BUILD_SHA" \
-            --prerelease --latest=false --title "NOOP Hydration Coach — iOS test ${BUILD_SHA:0:12}" \
+            --prerelease --latest=false --title "NOOP Hydration Coach — iOS ${BUILD_SHA:0:12}" \
             --notes-file "$NOTES" build/ios-distribution/*.ipa \
             build/ios-distribution/altstore-hydration-source.json build/ios-distribution/SHA256SUMS
           echo "## iPhone download" >> "$GITHUB_STEP_SUMMARY"

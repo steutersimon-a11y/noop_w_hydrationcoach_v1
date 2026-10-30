@@ -34,6 +34,12 @@ public final class FrameRouter {
         didSet {
             rawDumpedRespCmds.removeAll(); loggedFirmwareGate = nil; deviceId = nil
             rejectTally = FrameRejectTally(); loggedRejectReasons.removeAll()
+            dispatchedAlarmEventTs.removeAll()
+            state.lastSmartAlarmEventDate = nil
+            state.lastSmartAlarmEventDeviceID = nil
+            state.alarmReportedEpoch = nil
+            state.alarmReportedAt = nil
+            state.alarmReportedDeviceID = nil
         }
     }
 
@@ -55,6 +61,7 @@ public final class FrameRouter {
     private var loggedFirmwareGate: String?
 
     private var rawDumpedRespCmds: Set<String> = []
+    private var dispatchedAlarmEventTs: [Int] = []
 
     public init(state: LiveState) {
         self.state = state
@@ -249,6 +256,9 @@ public final class FrameRouter {
                         d.set(deviceId, forKey: "alarm.lastReportedDeviceId")
                         d.set(raw, forKey: "alarm.lastReportedRaw")
                         d.set(Date().timeIntervalSince1970, forKey: "alarm.lastReportedAt")
+                        state.alarmReportedDeviceID = deviceId
+                        state.alarmReportedAt = Date()
+                        state.alarmReportedEpoch = Int(epoch)
                         // #34: count CONSECUTIVE rejections (reported ≠ what we last sent) — the signature of
                         // a corrupted strap alarm register. A matching readback resets it, so a transient
                         // (first read stale, then correct) never trips the warning; only a persistent refusal
@@ -300,7 +310,13 @@ public final class FrameRouter {
                         // "didn't buzz" report: SET went out, strap kept nothing. Name it plainly. Log-only.
                         let raw = Self.commandResponsePayloadHex(in: frame) ?? "empty"
                         state.append(log: "Alarm: strap reports NO alarm currently stored (epoch 0) — the arm did not persist on the strap (raw \(raw))")
+                        state.alarmReportedDeviceID = deviceId
+                        state.alarmReportedAt = Date()
+                        state.alarmReportedEpoch = 0
                     } else {
+                        state.alarmReportedEpoch = nil
+                        state.alarmReportedAt = nil
+                        state.alarmReportedDeviceID = nil
                         state.append(log: "Alarm: strap answered the alarm readback with an unrecognised payload (raw \(Self.commandResponsePayloadHex(in: frame) ?? "empty")) - layout undocumented, log-only")
                     }
                 } else if cmd.hasPrefix("SET_ALARM_TIME") {
@@ -460,6 +476,9 @@ public final class FrameRouter {
                 // the Backfiller). Event strings are "NAME(rawValue)".
                 if ev.hasPrefix("DOUBLE_TAP") {
                     dispatchDoubleTapOnce(eventTimestamp: parsed.parsed["event_timestamp"]?.intValue)
+                } else if ev.hasPrefix("STRAP_DRIVEN_ALARM_EXECUTED") {
+                    // Select the next hardware alarm before an offload can occupy the command path.
+                    dispatchAlarmEvent(eventTimestamp: parsed.parsed["event_timestamp"]?.intValue)
                 }
                 // Strap-pushed event = "I may have new data" → kick a (rate-limited) sync.
                 onSyncTrigger?()
@@ -541,25 +560,28 @@ public final class FrameRouter {
                     handleWrist(on: true, duringSync: false)
                 } else if ev.hasPrefix("WRIST_OFF") {
                     handleWrist(on: false, duringSync: false)
-                } else if ev.hasPrefix("STRAP_DRIVEN_ALARM_EXECUTED") {
-                    // Fire observability (#401 close-out): Android has always logged this line
-                    // (WhoopBleClient.handleFrame); iOS/macOS silently ran the callback, which is why a
-                    // "did it actually buzz?" report could never be settled from a strap log ("log
-                    // successes" forensics rule). With the armed line (armStrapAlarm) and the readback
-                    // line (GET_ALARM_TIME) this makes every future report one-log decidable. The re-arm
-                    // below writes a fresh "armed" line, so the two read as one sequence, not a bug.
-                    state.append(log: "Alarm: strap-driven wake fired (event 57), re-arming the next day's instant")
-                    UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "alarm.lastFiredAt")  // #34 debug export
-                    // The strap fired its firmware smart alarm → re-arm the next day's instant (the
-                    // alarm is a single absolute time with no recurrence). Belt-and-suspenders to the
-                    // daily/foreground re-arm in AppModel, since this event isn't always observed.
-                    state.onSmartAlarmFired?()
                 }
             }
 
         default:
             break
         }
+    }
+
+    /// Expose only live, integrity-checked execution metadata, never offloaded alarm history.
+    private func dispatchAlarmEvent(eventTimestamp ts: Int?) {
+        if let ts, ts > 0 {
+            guard !dispatchedAlarmEventTs.contains(ts) else { return }
+            dispatchedAlarmEventTs.append(ts)
+            if dispatchedAlarmEventTs.count > 32 { dispatchedAlarmEventTs.removeFirst() }
+        }
+        state.lastSmartAlarmEventDate = ts.flatMap {
+            $0 > 0 ? Date(timeIntervalSince1970: TimeInterval($0)) : nil
+        }
+        state.lastSmartAlarmEventDeviceID = deviceId
+        state.append(log: "Alarm: strap reports firmware alarm execution (event 57)")
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "alarm.lastFiredAt")
+        state.onSmartAlarmFired?()
     }
 
     // MARK: - Advertising-name decode (WHOOP 4.0 / Harvard)

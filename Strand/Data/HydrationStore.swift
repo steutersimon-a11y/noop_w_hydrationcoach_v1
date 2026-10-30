@@ -218,6 +218,28 @@ extension Repository {
         return inserted
     }
 
+    /// Log one deliberate glass/bottle gesture, even between reminders or after the goal is reached.
+    /// The coordinator aggregates the taps first; SQLite commits the chosen serving and stable
+    /// event receipt together, so duplicate delivery or a later correction cannot credit it again.
+    @discardableResult
+    func logHydrationGesture(receiptID: String, additionalReceiptIDs: [String] = [], amountMl: Int, day: String,
+                             at date: Date) async throws -> Bool {
+        let timeZone = NSTimeZone.default
+        let seconds = date.timeIntervalSince1970
+        guard seconds.isFinite, abs(seconds) < Double(Int64.max) / 1_000 - 1,
+              day == Repository.localDayKey(date, timeZone: timeZone), amountMl > 0 else {
+            throw HydrationLogError.invalidEntry
+        }
+        guard let store = await storeHandle() else { throw HydrationLogError.storeUnavailable }
+        let inserted = try await store.addHydrationGestureEntry(
+            HydrationEntry(amountMl: amountMl, loggedAt: date), day: day,
+            legacyEntries: Self.hydrationEntries(day: day), receiptID: receiptID,
+            additionalReceiptIDs: additionalReceiptIDs,
+            timeZone: timeZone)
+        if inserted { await refreshHydrationEntries(day: day, store: store) }
+        return inserted
+    }
+
     // MARK: - Per-entry edit/delete (#798)
 
     /// The existing editable list, migrated lazily from UserDefaults into the total's SQLite database.

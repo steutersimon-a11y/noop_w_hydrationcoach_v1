@@ -5464,7 +5464,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// rev-1 SET_ALARM_TIME. WHOOP 5/MG sends the REVISION_4 body alone — the strap maintains
     /// its RTC (set during the connect handshake / history sync) and the official app's alarm
     /// path doesn't re-set it (wire observation; mirrors Android WhoopBleClient.armStrapAlarm).
-    /// The WHOOP 4.0 strap buzzes at `date` even if the app is backgrounded or force-quit
+    /// A stored WHOOP 4.0 alarm can fire at `date` even if the app is backgrounded or force-quit
     /// (event STRAP_DRIVEN_ALARM_EXECUTED=57). The 5/MG path intends the same behavior but remains
     /// experimental. This is the only strap-alarm path; NOOP has no light-sleep early-wake layer.
     ///
@@ -5590,6 +5590,15 @@ public final class BLEManager: NSObject, ObservableObject {
         Self.hydrationCoachHapticAllowed(family: selectedModel.deviceFamily,
                                         commandChannelReady: commandChannelReady,
                                         bonded: didBond && state.encryptedBond)
+    }
+
+    /// Select the existing reversible single-slot alarm only on a ready, bonded WHOOP 4.0.
+    /// True records a submitted request; the separate readback describes what the strap reports.
+    @discardableResult
+    func armHydrationCoachAlarm(at date: Date) -> Bool {
+        guard canSendHydrationCoachHaptic, date > Date() else { return false }
+        armStrapAlarm(at: date)
+        return true
     }
 
     /// Pure policy seam used by the production gate above and app-target tests.
