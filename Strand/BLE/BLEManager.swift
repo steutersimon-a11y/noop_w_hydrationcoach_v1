@@ -5464,7 +5464,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// rev-1 SET_ALARM_TIME. WHOOP 5/MG sends the REVISION_4 body alone — the strap maintains
     /// its RTC (set during the connect handshake / history sync) and the official app's alarm
     /// path doesn't re-set it (wire observation; mirrors Android WhoopBleClient.armStrapAlarm).
-    /// The WHOOP 4.0 strap buzzes at `date` even if the app is backgrounded or force-quit
+    /// A stored WHOOP 4.0 alarm can fire at `date` even if the app is backgrounded or force-quit
     /// (event STRAP_DRIVEN_ALARM_EXECUTED=57). The 5/MG path intends the same behavior but remains
     /// experimental. This is the only strap-alarm path; NOOP has no light-sleep early-wake layer.
     ///
@@ -5581,6 +5581,42 @@ public final class BLEManager: NSObject, ObservableObject {
     func getStrapAlarm() {
         send(.getAlarmTime, payload: [0x01])
         log("Alarm: requested current alarm time")
+    }
+
+    /// Whether the opt-in iOS Hydration Coach can submit a haptic command on this WHOOP 4.0 link.
+    /// A genuine per-connection encrypted bond is required in addition to the actual command channel;
+    /// cached "bonded" identity alone is not proof a restored/reconnecting link can accept commands.
+    var canSendHydrationCoachHaptic: Bool {
+        Self.hydrationCoachHapticAllowed(family: selectedModel.deviceFamily,
+                                        commandChannelReady: commandChannelReady,
+                                        bonded: didBond && state.encryptedBond)
+    }
+
+    /// Select the existing reversible single-slot alarm only on a ready, bonded WHOOP 4.0.
+    /// True records a submitted request; the separate readback describes what the strap reports.
+    @discardableResult
+    func armHydrationCoachAlarm(at date: Date) -> Bool {
+        guard canSendHydrationCoachHaptic, date > Date() else { return false }
+        armStrapAlarm(at: date)
+        return true
+    }
+
+    /// Pure policy seam used by the production gate above and app-target tests.
+    static func hydrationCoachHapticAllowed(family: DeviceFamily,
+                                           commandChannelReady: Bool, bonded: Bool) -> Bool {
+        family == .whoop4 && commandChannelReady && bonded
+    }
+
+    /// Submit the existing reversible pattern command without touching the waking firmware alarm.
+    /// True means only that a ready link accepted the write request, not that the motor fired. Do not
+    /// route through `buzzStrapOnce`: that helper also sends RUN_ALARM. Confirmation callers must
+    /// persist the water log successfully before invoking this same bounded cue.
+    @discardableResult
+    func buzzHydrationCoach() -> Bool {
+        guard canSendHydrationCoachHaptic else { return false }
+        send(.runHapticsPattern, payload: [2, 1, 0, 0, 0], writeType: .withResponse)
+        log("Hydration: haptic command submitted (delivery unconfirmed)")
+        return true
     }
 
     /// One-shot user buzz (#921): the on-device-confirmed "vibrate the strap now" sequence.

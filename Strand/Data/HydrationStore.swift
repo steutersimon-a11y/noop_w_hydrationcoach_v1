@@ -1,20 +1,19 @@
 import Foundation
 import WhoopStore
 import StrandAnalytics
+#if os(iOS)
+import HydrationCoach
+#endif
 
 // MARK: - Hydration tracker (MVP) — opt-in, local-only water logging
 //
-// The user logs water with three quick taps (Sip 30 ml / Cup 237 ml / Bottle 500 ml). The day TOTAL is
-// banked in the generic metric-series tall table under a dedicated source/key — the SAME `metricSeries`
-// table + `upsertMetricSeries` path every other generic daily series uses (no schema change). Because the
-// table holds one row per (deviceId, day, key), a tap reads the day's running total and re-upserts
-// total + amount, so the stored value IS "the sum of today's hydration logged for this local day".
-//
-// This is the BYTE-PARITY twin of the Android `com.noop.analytics.HydrationStore`: identical source id
-// ("hydration"), identical key ("hydration"), identical additive-accumulation logic, identical 7-day
-// history projection (one row per local calendar day, 0 for empty days, oldest first). Per-tap timestamps
-// are intentionally NOT persisted on either platform — the day total is the source of truth and the MVP
-// detail shows the honest day figure. Everything stays on-device; nothing is synced.
+// Manual and acknowledged coach drinks accumulate in the existing `metricSeries` source/key
+// ("hydration" / "hydration"); imported HealthKit water remains a separate, replacement-only row.
+// Editable entry metadata is lazily migrated from the existing UserDefaults JSON into namespaced
+// SQLite cursor records. This lets a coach drink, its editable row and its acknowledgment receipt
+// commit in one transaction. No second hydration total or database schema is introduced. The
+// UserDefaults JSON is retained as a compatibility mirror, never as the post-migration authority.
+// Android keeps its existing implementation; this coach phase targets the fork's iOS app only.
 
 enum HydrationStore {
     /// Source/device id the hydration total is written under — its own local-only source so it is never
@@ -30,7 +29,8 @@ enum HydrationStore {
 
     /// UserDefaults prefix for the per-day entry list (#798). One JSON array per local day, keyed
     /// `noop.hydrationEntries.<yyyy-MM-dd>`. Local-only, on-device, never synced - the same privacy posture
-    /// as the day total. The day total in `metricSeries` stays the canonical figure the rest of the app
+    /// as the day total. This list is now a migration input/compatibility mirror; SQLite owns edits.
+    /// The day total in `metricSeries` stays the canonical figure the rest of the app
     /// reads (Today card, ring, 7-day history); the entry list is the editable detail behind it, kept in
     /// sync so deleting/editing an entry re-derives and re-banks the total.
     static let entriesKeyPrefix = "noop.hydrationEntries."
@@ -59,19 +59,8 @@ enum HydrationStore {
 // MARK: - Per-entry model (#798) - individual logged drinks for edit/delete
 
 /// One logged drink: a stable id, the amount (ml) and the wall-clock time it was logged. Local-only;
-/// persisted as a JSON array per local day. `Codable`/`Equatable` so the list round-trips through
-/// UserDefaults and is unit-testable.
-struct HydrationEntry: Identifiable, Equatable, Codable {
-    let id: UUID
-    var amountMl: Int
-    var loggedAt: Date
-
-    init(id: UUID = UUID(), amountMl: Int, loggedAt: Date = Date()) {
-        self.id = id
-        self.amountMl = amountMl
-        self.loggedAt = loggedAt
-    }
-}
+/// persisted beside its total in SQLite. The pre-coach JSON list migrates lazily per local day.
+typealias HydrationEntry = HydrationLogEntry
 
 /// Pure list operations over the per-day entries (#798). Kept free of persistence/UI so the add / delete /
 /// edit / total math is unit-testable in isolation. The day total is ALWAYS the sum of the (clamped to ≥ 0)
@@ -202,70 +191,95 @@ extension Repository {
     func logHydration(amountMl: Int, day: String? = nil) async -> Double {
         let dayKey = day ?? Repository.localDayKey(Date())
         guard amountMl > 0, let store = await storeHandle() else { return await hydrationTotal(day: dayKey) }
-        // MANUAL total, never the combined one (#949) — see `hydrationManualTotal`.
-        let current = await hydrationManualTotal(day: dayKey)
-        let next = current + Double(amountMl)
-        _ = try? await store.upsertMetricSeries(
-            [MetricPoint(day: dayKey, key: HydrationStore.key, value: next)],
-            deviceId: HydrationStore.sourceId)
-        // #798 - also record the per-entry row so the detail can show, edit and delete this exact drink.
-        let entries = HydrationEntries.adding(Self.hydrationEntries(day: dayKey), amountMl: amountMl)
-        Self.writeHydrationEntries(entries, day: dayKey)
-        // #989: hydration writes never bump refreshSeq, so tell the Today card directly.
-        noteHydrationChanged()
-        // `next` is the manual row; callers of this return value display it, so hand back the combined
-        // figure (#949). Every in-tree caller discards it and re-reads, but a caller that trusted it
-        // would otherwise show a total that drops the imported water.
-        return next + (await hydrationImportedTotal(day: dayKey))
+        do {
+            let inserted = try await store.addHydrationLogEntry(
+                HydrationEntry(amountMl: amountMl), day: dayKey,
+                legacyEntries: Self.hydrationEntries(day: dayKey))
+            if inserted { await refreshHydrationEntries(day: dayKey, store: store) }
+        } catch {
+            // A failed write is not a logged drink. Keep entries and the visible total unchanged.
+        }
+        return await hydrationTotal(day: dayKey)
+    }
+
+    /// Coach-only, durable acceptance seam. The reminder window is checked by the coordinator;
+    /// this additionally binds the receipt to the supplied local day and atomically stores its drink.
+    /// A duplicate or failed commit must never produce a confirmation haptic.
+    @discardableResult
+    func logHydrationReminder(reminderID: String, amountMl: Int, goalML: Int,
+                              day: String, at date: Date) async throws -> Bool {
+        guard day == Repository.localDayKey(date), amountMl > 0,
+              !reminderID.isEmpty else { throw HydrationLogError.invalidEntry }
+        guard let store = await storeHandle() else { throw HydrationLogError.storeUnavailable }
+        let inserted = try await store.addHydrationLogEntry(
+            HydrationEntry(amountMl: amountMl, loggedAt: date), day: day,
+            legacyEntries: Self.hydrationEntries(day: day), reminderID: reminderID, goalML: goalML)
+        if inserted { await refreshHydrationEntries(day: day, store: store) }
+        return inserted
+    }
+
+    /// Log one deliberate glass/bottle gesture, even between reminders or after the goal is reached.
+    /// The coordinator aggregates the taps first; SQLite commits the chosen serving and stable
+    /// event receipt together, so duplicate delivery or a later correction cannot credit it again.
+    @discardableResult
+    func logHydrationGesture(receiptID: String, additionalReceiptIDs: [String] = [], amountMl: Int, day: String,
+                             at date: Date) async throws -> Bool {
+        let timeZone = NSTimeZone.default
+        let seconds = date.timeIntervalSince1970
+        guard seconds.isFinite, abs(seconds) < Double(Int64.max) / 1_000 - 1,
+              day == Repository.localDayKey(date, timeZone: timeZone), amountMl > 0 else {
+            throw HydrationLogError.invalidEntry
+        }
+        guard let store = await storeHandle() else { throw HydrationLogError.storeUnavailable }
+        let inserted = try await store.addHydrationGestureEntry(
+            HydrationEntry(amountMl: amountMl, loggedAt: date), day: day,
+            legacyEntries: Self.hydrationEntries(day: day), receiptID: receiptID,
+            additionalReceiptIDs: additionalReceiptIDs,
+            timeZone: timeZone)
+        if inserted { await refreshHydrationEntries(day: day, store: store) }
+        return inserted
     }
 
     // MARK: - Per-entry edit/delete (#798)
 
-    /// Today (or `day`)'s individual logged drinks, oldest first, as persisted in UserDefaults. Empty when
-    /// nothing has been logged that day. Local-only; never synced.
-    func hydrationEntries(day: String? = nil) -> [HydrationEntry] {
-        Self.hydrationEntries(day: day ?? Repository.localDayKey(Date()))
+    /// The existing editable list, migrated lazily from UserDefaults into the total's SQLite database.
+    /// Reopening after a commit cannot lose a coach entry even if its compatibility mirror was stale.
+    func hydrationEntries(day: String? = nil) async -> [HydrationEntry] {
+        let dayKey = day ?? Repository.localDayKey(Date())
+        let legacy = Self.hydrationEntries(day: dayKey)
+        guard let store = await storeHandle() else { return legacy }
+        return (try? await store.hydrationLogEntries(day: dayKey, legacyEntries: legacy)) ?? legacy
     }
 
-    /// Delete one logged entry by id, then re-derive the day total from the surviving entries and re-bank it
-    /// into `metricSeries` so the ring, Today card and 7-day history all reflect the deletion. Returns the
-    /// new day total (ml).
     @discardableResult
     func deleteHydrationEntry(id: UUID, day: String? = nil) async -> Double {
-        let dayKey = day ?? Repository.localDayKey(Date())
-        let next = HydrationEntries.removing(Self.hydrationEntries(day: dayKey), id: id)
-        Self.writeHydrationEntries(next, day: dayKey)
-        return await rebankHydrationTotal(entries: next, day: dayKey)
+        await updateHydrationEntry(id: id, amountMl: 0, day: day)
     }
 
-    /// Set an existing entry's amount (a non-positive amount deletes it), then re-derive + re-bank the day
-    /// total. Returns the new day total (ml). Backs the "edit a logged drink / set a custom size" flow.
+    /// Manual correction never removes a reminder's acknowledgment receipt.
     @discardableResult
     func updateHydrationEntry(id: UUID, amountMl: Int, day: String? = nil) async -> Double {
         let dayKey = day ?? Repository.localDayKey(Date())
-        let next = HydrationEntries.updating(Self.hydrationEntries(day: dayKey), id: id, amountMl: amountMl)
-        Self.writeHydrationEntries(next, day: dayKey)
-        return await rebankHydrationTotal(entries: next, day: dayKey)
-    }
-
-    /// Re-derive the day total from `entries` and upsert it into `metricSeries` (the canonical total). The
-    /// per-entry list is the source of truth for an edited/deleted day; this keeps the rest of the app in sync.
-    @discardableResult
-    private func rebankHydrationTotal(entries: [HydrationEntry], day dayKey: String) async -> Double {
-        let total = HydrationEntries.total(entries)
-        if let store = await storeHandle() {
-            _ = try? await store.upsertMetricSeries(
-                [MetricPoint(day: dayKey, key: HydrationStore.key, value: total)],
-                deviceId: HydrationStore.sourceId)
+        guard let store = await storeHandle() else { return await hydrationTotal(day: dayKey) }
+        do {
+            _ = try await store.updateHydrationLogEntry(id: id, amountMl: amountMl, day: dayKey,
+                                                        legacyEntries: Self.hydrationEntries(day: dayKey))
+            await refreshHydrationEntries(day: dayKey, store: store)
+        } catch {
+            // Preserve the persisted entry on failed correction rather than showing a phantom edit.
         }
-        // #989: edits/deletes funnel through here; tell the Today card directly (see logHydration).
-        noteHydrationChanged()
-        // The entry list only ever describes hand-logged drinks, so re-deriving from it must not be
-        // allowed to erase the imported row — write the manual figure, return the combined one (#949).
-        return total + (await hydrationImportedTotal(day: dayKey))
+        return await hydrationTotal(day: dayKey)
     }
 
-    // MARK: - Entry persistence (UserDefaults JSON, one array per local day)
+    private func refreshHydrationEntries(day: String, store: WhoopStore) async {
+        if let entries = try? await store.hydrationLogEntries(day: day, legacyEntries: []) {
+            // Compatibility mirror only; SQLite is authoritative after the per-day migration marker.
+            Self.writeHydrationEntries(entries, day: day)
+        }
+        noteHydrationChanged()
+    }
+
+    // MARK: - Legacy entry migration / compatibility mirror (UserDefaults JSON)
 
     fileprivate static func hydrationEntries(day dayKey: String) -> [HydrationEntry] {
         guard let data = UserDefaults.standard.data(forKey: HydrationStore.entriesKey(forDay: dayKey)),
@@ -288,7 +302,8 @@ extension Repository {
     /// full day grid so empty days read as 0 rather than vanishing).
     func hydrationHistory(days: Int = 7, now: Date = Date()) async -> [(day: String, value: Double)] {
         let n = max(1, days)
-        let from = now.addingTimeInterval(-Double(n - 1) * 86_400)
+        let calendar = Calendar.current
+        let from = calendar.date(byAdding: .day, value: -(n - 1), to: now) ?? now
         let fromKey = Repository.localDayKey(from)
         let toKey = Repository.localDayKey(now)
         var byDay: [String: Double] = [:]
@@ -304,7 +319,7 @@ extension Repository {
             }
         }
         return (0..<n).map { i in
-            let key = Repository.localDayKey(now.addingTimeInterval(-Double(n - 1 - i) * 86_400))
+            let key = Repository.localDayKey(calendar.date(byAdding: .day, value: -(n - 1 - i), to: now) ?? now)
             return (key, byDay[key] ?? 0)
         }
     }
@@ -312,6 +327,13 @@ extension Repository {
     /// Today's hydration goal (ml) from the profile sex + today's Effort score. Pure math in
     /// `HydrationGoal`; this just feeds it the live inputs (today's `strain` is NOOP's 0–100 Effort).
     func hydrationGoalML(profileSex: String) -> Int {
-        HydrationGoal.dailyGoalML(sex: profileSex, effort: today?.strain)
+        #if os(iOS)
+        if let data = UserDefaults.standard.data(forKey: HydrationCoachSettings.storageKey),
+           let settings = try? JSONDecoder().decode(HydrationCoachSettings.self, from: data),
+           settings.enabled, settings.isValid {
+            return settings.personalGoalML
+        }
+        #endif
+        return HydrationGoal.dailyGoalML(sex: profileSex, effort: today?.strain)
     }
 }

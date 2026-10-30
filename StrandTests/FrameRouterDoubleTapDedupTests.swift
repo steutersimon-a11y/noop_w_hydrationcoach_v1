@@ -50,6 +50,52 @@ final class FrameRouterDoubleTapDedupTests: XCTestCase {
     }
 
     @MainActor
+    func testEventTimeIsAvailableInsideTheOriginalCallback() {
+        let live = LiveState()
+        var received: Date?
+        live.onDoubleTap = { received = live.lastDoubleTapEventDate }
+        let r = router(live)
+        r.handle(frame: bytes(doubleTapHex))
+        XCTAssertEqual(received, Date(timeIntervalSince1970: TimeInterval(doubleTapEventTs)))
+    }
+
+    @MainActor
+    func testFreshOffloadProvidesTheSameEventTimeWithoutChangingReplayDeduplication() {
+        let live = LiveState()
+        var received: [Date?] = []
+        live.onDoubleTap = { received.append(live.lastDoubleTapEventDate) }
+        let r = router(live)
+        r.dispatchLiveGestureIfFresh(frame: bytes(doubleTapHex), now: doubleTapEventTs + 10)
+        r.handle(frame: bytes(doubleTapHex))
+        XCTAssertEqual(received, [Date(timeIntervalSince1970: TimeInterval(doubleTapEventTs))])
+    }
+
+    @MainActor
+    func testMissingEventTimeCannotBorrowThePreviousGesturesTime() {
+        let live = LiveState()
+        var received: [Date?] = []
+        live.onDoubleTap = { received.append(live.lastDoubleTapEventDate) }
+        let r = router(live)
+        r.handle(frame: bytes(doubleTapHex))
+        r.handle(frame: doubleTapFrame(eventTs: 0))
+        XCTAssertEqual(received.count, 2, "normal double-tap actions retain their existing behavior")
+        XCTAssertNotNil(received[0])
+        XCTAssertNil(received[1], "a stricter hydration consumer must fail closed on missing event time")
+    }
+
+    @MainActor
+    func testHydrationHapticPolicyRequiresWhoop4AndAReadyBondedCommandChannel() {
+        XCTAssertTrue(BLEManager.hydrationCoachHapticAllowed(
+            family: .whoop4, commandChannelReady: true, bonded: true))
+        XCTAssertFalse(BLEManager.hydrationCoachHapticAllowed(
+            family: .whoop4, commandChannelReady: false, bonded: true))
+        XCTAssertFalse(BLEManager.hydrationCoachHapticAllowed(
+            family: .whoop4, commandChannelReady: true, bonded: false))
+        XCTAssertFalse(BLEManager.hydrationCoachHapticAllowed(
+            family: .whoop5, commandChannelReady: true, bonded: true))
+    }
+
+    @MainActor
     func testARepeatedOffloadOfTheSameEventNeverFiresAgain() {
         let live = LiveState()
         var fired = 0

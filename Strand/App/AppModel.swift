@@ -62,6 +62,10 @@ final class AppModel: ObservableObject {
     let profile = ProfileStore()
     /// Behaviour settings: double-tap action, wear automation, zone coaching, smart alarm, illness watch.
     let behavior = BehaviorStore()
+    #if os(iOS)
+    /// Phase-one iOS hydration reminders; no firmware alarm is reserved or overwritten.
+    lazy var hydrationCoach = HydrationCoachController(model: self)
+    #endif
     /// On-device WHOOP-style recovery/strain/sleep computation from raw strap streams.
     let intelligence: IntelligenceEngine
 
@@ -311,6 +315,9 @@ final class AppModel: ObservableObject {
         // firmware pushes STRAP_DRIVEN_ALARM_EXECUTED). Gated on enabled inside applySmartAlarm.
         live.onSmartAlarmFired = { [weak self] in
             guard let self, self.behavior.smartAlarmEnabled else { return }
+            #if os(iOS)
+            if self.hydrationCoach.alarmFired(eventDate: self.live.lastSmartAlarmEventDate) { return }
+            #endif
             // PR #577 (iOS): mirror the strap's wake buzz to a local notification so a phone-in-pocket
             // user still gets woken; no-op on macOS / when wrist alerts are off.
             AppModel.postSmartAlarm()
@@ -1695,6 +1702,23 @@ final class AppModel: ObservableObject {
 
     func applySmartAlarm() {
         let overrides = WindDownNudge.perDayWakeOverrides
+        #if os(iOS)
+        // One owner selects the shared hardware slot. Wake settings and the independent iOS
+        // backup stay in the existing alarm system, including weekday overrides.
+        if hydrationCoach.coordinateAlarm() {
+            if behavior.smartAlarmEnabled {
+                Self.scheduleSmartAlarmBackupNotification(
+                    minutes: behavior.smartAlarmMinutes, weekdays: behavior.smartAlarmWeekdays,
+                    overrides: overrides,
+                    log: { [weak self] line in
+                        Task { @MainActor in self?.live.append(log: line) }
+                    })
+            } else {
+                Self.cancelSmartAlarmBackupNotification()
+            }
+            return
+        }
+        #endif
         guard behavior.smartAlarmEnabled else {
             ble.disableStrapAlarm()
             Self.cancelSmartAlarmBackupNotification()
@@ -1719,6 +1743,37 @@ final class AppModel: ObservableObject {
                                                   log: { [weak self] line in
                                                       Task { @MainActor in self?.live.append(log: line) }
                                                   })
+    }
+
+    #if os(iOS)
+    /// Read the same effective alarm settings as the native alarm screen; coaching owns no wake picker.
+    func resolvedCoachWake(on day: Date, calendar: Calendar = .current) -> Date? {
+        guard behavior.smartAlarmEnabled else { return nil }
+        return Self.scheduledSmartAlarmDate(on: day, minutes: behavior.smartAlarmMinutes,
+                                            weekdays: behavior.smartAlarmWeekdays,
+                                            overrides: WindDownNudge.perDayWakeOverrides,
+                                            calendar: calendar)
+    }
+
+    /// The next wake remains the normal system's weekday/override-aware alarm occurrence.
+    func resolvedNextCoachWake(after now: Date, calendar: Calendar = .current) -> Date? {
+        guard behavior.smartAlarmEnabled else { return nil }
+        return Self.nextSmartAlarmDate(minutes: behavior.smartAlarmMinutes,
+                                       weekdays: behavior.smartAlarmWeekdays,
+                                       overrides: WindDownNudge.perDayWakeOverrides,
+                                       from: now, calendar: calendar)
+    }
+    #endif
+
+    /// Resolve one day's wake through the canonical future-occurrence resolver, including midnight.
+    nonisolated static func scheduledSmartAlarmDate(on day: Date, minutes: Int,
+                                                    weekdays: Set<Int>, overrides: [Int: Int] = [:],
+                                                    calendar: Calendar = .current) -> Date? {
+        let beforeDay = calendar.startOfDay(for: day).addingTimeInterval(-1)
+        guard let wake = nextSmartAlarmDate(minutes: minutes, weekdays: weekdays,
+                                            overrides: overrides, from: beforeDay, calendar: calendar),
+              calendar.isDate(wake, inSameDayAs: day) else { return nil }
+        return wake
     }
 
     /// Compute the next fire date for the smart alarm, honouring the weekday selection.
@@ -1790,9 +1845,21 @@ final class AppModel: ObservableObject {
     ///
     /// A double tap rather than a single one because a strap takes knocks against bars and benches all
     /// session, and two deliberate taps are not something a rack does by accident.
-    var strapDoubleTapOverride: (@MainActor () -> Void)?
+    var strapDoubleTapOverride: (@MainActor () -> Void)? {
+        didSet {
+            #if os(iOS)
+            hydrationCoach.workoutContextChanged()
+            #endif
+        }
+    }
 
     private func handleDoubleTap() {
+        #if os(iOS)
+        // Wake dismissal consumes its gesture before hydration starts. During a running workout
+        // the coordinator yields to Lift Log/the configured action. Its own event aggregation
+        // handles glass versus bottle before the generic action's 1.2-second debounce.
+        if hydrationCoach.handleDoubleTap(eventDate: live.lastDoubleTapEventDate) { return }
+        #endif
         let now = Date()
         let since = now.timeIntervalSince(lastDoubleTapAt)
         guard since > 1.2 else {   // debounce repeats

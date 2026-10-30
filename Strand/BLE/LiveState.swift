@@ -543,9 +543,21 @@ public final class LiveState: ObservableObject {
     /// encrypted bond → amber either way.
     public var connectionStatusIsIdle: Bool { (!connected && bonded) || (connected && !encryptedBond) }
 
-    /// Fired (live only) when the strap reports a DOUBLE_TAP gesture. Wired by AppModel to the
+    /// Fired once for a live/fresh-offload DOUBLE_TAP gesture. Wired by AppModel to the
     /// user's chosen action. Debounced in AppModel.
     public var onDoubleTap: (() -> Void)?
+    /// The strap's event time for the gesture currently being dispatched through `onDoubleTap`.
+    /// Set immediately before the callback on both live and fresh-offload paths; nil when missing or
+    /// invalid, so a consumer that requires evidence cannot accidentally reuse a previous event time.
+    /// This is metadata, not proof that an autonomous firmware-alarm dismissal reaches the app.
+    public var lastDoubleTapEventDate: Date?
+    /// Timestamp and source of the live firmware alarm event, available inside its callback.
+    public var lastSmartAlarmEventDate: Date?
+    public var lastSmartAlarmEventDeviceID: String?
+    /// Current-link readback evidence; a write attempt alone does not establish a stored alarm.
+    @Published public var alarmReportedEpoch: Int?
+    @Published public var alarmReportedAt: Date?
+    @Published public var alarmReportedDeviceID: String?
     /// Fired (live only) when wrist-wear changes (true = put on, false = taken off).
     public var onWristChange: ((Bool) -> Void)?
     /// Fired (live only) when the strap reports it executed its firmware alarm
@@ -759,6 +771,11 @@ public final class LiveState: ObservableObject {
     /// R-R strip can't outlive the link. Called on CoreBluetooth disconnect (BLEManager), the twin of
     /// the `charging = nil` / `encryptedBond = false` clears on the same path.
     public func clearBiometrics() {
+        lastSmartAlarmEventDate = nil
+        lastSmartAlarmEventDeviceID = nil
+        alarmReportedEpoch = nil
+        alarmReportedAt = nil
+        alarmReportedDeviceID = nil
         heartRate = nil
         rr.removeAll()
         rrRecent.removeAll()

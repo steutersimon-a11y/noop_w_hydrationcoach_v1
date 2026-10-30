@@ -1,0 +1,97 @@
+name: Update AltStore sources
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published iPhone release to advertise (empty selects the newest release)
+        required: false
+        default: ''
+        type: string
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ios-altstore-source.yml'
+      - 'Tools/ios_altstore_channels.py'
+      - 'Tools/test_ios_altstore_channels.py'
+      - 'Tools/altstore-bootstrap/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-altstore-sources-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REQUESTED_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Validate source recovery snapshot
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          tag = 'hydration-coach-36616a7b30d4'
+          root = Path('Tools/altstore-bootstrap') / tag
+          source = root / 'altstore-hydration-source.json'
+          manifest = (root / 'SHA256SUMS').read_text().splitlines()
+          expected = {}
+          for line in manifest:
+              digest, name = line.split(maxsplit=1)
+              expected[name.lstrip('*')] = digest
+          assert hashlib.sha256(source.read_bytes()).hexdigest() == expected[source.name], 'Source snapshot checksum mismatch'
+          data = json.loads(source.read_text())
+          repository = os.environ['GITHUB_REPOSITORY']
+          assert data['sourceURL'] == f'https://github.com/{repository}/releases/download/{tag}/{source.name}'
+          assert data['apps'][0]['bundleIdentifier'] == 'com.noopapp.noop'
+          assert data['identifier'] and data['apps'][0]['versions']
+          print('Recovery source identity, JSON and checksum validated.')
+          PY
+      - name: Restore missing enrolled source metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHANNEL_TAG=hydration-coach-36616a7b30d4
+          SNAPSHOT="Tools/altstore-bootstrap/$CHANNEL_TAG"
+          ASSETS=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CHANNEL_TAG" --jq '.assets[].name')
+          for NAME in altstore-hydration-source.json SHA256SUMS; do
+            if ! printf '%s\n' "$ASSETS" | grep -Fxq -- "$NAME"; then
+              gh release upload "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" "$SNAPSHOT/$NAME"
+            fi
+          done
+      - name: Test channel updates
+        working-directory: Tools
+        run: python3 -m unittest -v test_ios_altstore_channels test_ios_sideload_source
+      - name: Select the current published iPhone release
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="$REQUESTED_TAG"
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq \
+              '[.[] | select(.draft == false) | select(.tag_name | startswith("hydration-coach-")) | select(any(.assets[]; .name | startswith("NOOP-Hydration-Coach-") and endswith(".ipa")))][0].tag_name')
+          fi
+          test -n "$RELEASE_TAG" && test "$RELEASE_TAG" != null
+          printf 'tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - name: Publish updates through existing source identities
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: >-
+          python3 Tools/ios_altstore_channels.py
+          --repository "$GITHUB_REPOSITORY" --release-tag "$RELEASE_TAG"
