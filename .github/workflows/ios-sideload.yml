@@ -8,6 +8,8 @@ on:
       - '.github/workflows/ios-sideload.yml'
       - 'Tools/ios_sideload_source.py'
       - 'Tools/test_ios_sideload_source.py'
+      - 'Tools/ios_altstore_channels.py'
+      - 'Tools/test_ios_altstore_channels.py'
       - 'Tools/anonymize-ios-app.sh'
       - 'Tools/prepare-ios-sideload-app.sh'
       - 'Strand/**'
@@ -33,6 +35,8 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: write
+    outputs:
+      release_tag: ${{ steps.package.outputs.tag }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -40,7 +44,7 @@ jobs:
           persist-credentials: false
       - name: Test sideload packaging helpers
         working-directory: Tools
-        run: python3 -m unittest -v test_anonymize_ios_app test_ios_sideload_source
+        run: python3 -m unittest -v test_anonymize_ios_app test_ios_sideload_source test_ios_altstore_channels
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -95,8 +99,11 @@ jobs:
           cat > "$NOTES" <<EOF
           iPhone Release build of the Hydration Coach from commit $BUILD_SHA.
 
-          Install the IPA with AltStore Classic or SideStore, or add this source:
-          https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/altstore-hydration-source.json
+          Install the IPA with AltStore Classic or SideStore, or keep using this update source:
+          https://github.com/$GITHUB_REPOSITORY/releases/download/hydration-coach-36616a7b30d4/altstore-hydration-source.json
+
+          This source keeps its address and identity across versions. Refresh it in AltStore to find updates.
+          The IPA in this release remains an archived build; the established source feeds track newer builds.
 
           AltStore/SideStore signs the app with your own Apple ID. No developer identity is embedded.
           Keep the widget extension enabled to preserve the requested App Group and widgets.
@@ -114,3 +121,26 @@ jobs:
             build/ios-distribution/altstore-hydration-source.json build/ios-distribution/SHA256SUMS
           echo "## iPhone download" >> "$GITHUB_STEP_SUMMARY"
           echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+
+  update-sources:
+    needs: ios
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    # Serialize metadata publication across branches without serializing the Mac builds.
+    concurrency:
+      group: ios-altstore-sources-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Update enrolled AltStore sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.ios.outputs.release_tag }}
+        run: >-
+          python3 Tools/ios_altstore_channels.py
+          --repository "$GITHUB_REPOSITORY" --release-tag "$TAG"

@@ -1,0 +1,65 @@
+{
+  "name": "NOOP Hydration Coach",
+  "identifier": "com.noopapp.noop.altstore.hydration.steutersimon-a11y.noop-w-hydrationcoach-v1.hydration-coach-36616a7b30d4",
+  "sourceURL": "https://github.com/steutersimon-a11y/noop_w_hydrationcoach_v1/releases/download/hydration-coach-36616a7b30d4/altstore-hydration-source.json",
+  "subtitle": "Wake alarm and adaptive hydration routine",
+  "description": "NOOP Hydration Coach iOS build, commit cf9e28b7acb3716f9793cc70b253bd42760ce838. Sign with AltStore Classic or SideStore. Uses NOOP's existing app identifier, so it can replace an installed NOOP; back up existing data before switching. Wake time stays in NOOP's Alarms screen. The shared WHOOP 4.0 alarm supports a wake-to-hydration-to-bedtime routine; following alarms require Bluetooth and iOS background event delivery. Physical haptics remain unverified. Based on the NOOP project: https://github.com/ryanbr/noop",
+  "iconURL": "https://github.com/ryanbr/noop/raw/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
+  "website": "https://github.com/steutersimon-a11y/noop_w_hydrationcoach_v1/releases/tag/hydration-coach-cf9e28b7acb3",
+  "tintColor": "44E2B0",
+  "apps": [
+    {
+      "name": "NOOP Hydration Coach",
+      "bundleIdentifier": "com.noopapp.noop",
+      "developerName": "NoopApp",
+      "subtitle": "Optional hydration reminders on your iPhone",
+      "localizedDescription": "NOOP Hydration Coach iOS build, commit cf9e28b7acb3716f9793cc70b253bd42760ce838. Sign with AltStore Classic or SideStore. Uses NOOP's existing app identifier, so it can replace an installed NOOP; back up existing data before switching. Wake time stays in NOOP's Alarms screen. The shared WHOOP 4.0 alarm supports a wake-to-hydration-to-bedtime routine; following alarms require Bluetooth and iOS background event delivery. Physical haptics remain unverified.",
+      "iconURL": "https://github.com/ryanbr/noop/raw/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
+      "tintColor": "44E2B0",
+      "category": "healthcare-fitness",
+      "screenshotURLs": [],
+      "versions": [
+        {
+          "version": "12.1.1",
+          "buildVersion": "440",
+          "date": "2026-10-30",
+          "localizedDescription": "NOOP Hydration Coach iOS build, commit cf9e28b7acb3716f9793cc70b253bd42760ce838. Sign with AltStore Classic or SideStore. Uses NOOP's existing app identifier, so it can replace an installed NOOP; back up existing data before switching. Wake time stays in NOOP's Alarms screen. The shared WHOOP 4.0 alarm supports a wake-to-hydration-to-bedtime routine; following alarms require Bluetooth and iOS background event delivery. Physical haptics remain unverified.",
+          "downloadURL": "https://github.com/steutersimon-a11y/noop_w_hydrationcoach_v1/releases/download/hydration-coach-cf9e28b7acb3/NOOP-Hydration-Coach-cf9e28b7acb3.ipa",
+          "size": 22171134,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "12.1.0",
+          "buildVersion": "439",
+          "date": "2026-10-29",
+          "localizedDescription": "NOOP Hydration Coach iOS test build, commit 36616a7b30d41bbce1c9fcfa3671dc89a7cf6ed5. Sign with AltStore Classic or SideStore. Uses NOOP's existing app identifier, so it can replace an installed NOOP; back up existing data before switching. Physical WHOOP 4.0 haptics and locked-phone behavior remain unverified.",
+          "downloadURL": "https://github.com/steutersimon-a11y/noop_w_hydrationcoach_v1/releases/download/hydration-coach-36616a7b30d4/NOOP-Hydration-Coach-36616a7b30d4.ipa",
+          "size": 22028357,
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          "com.apple.developer.healthkit",
+          "com.apple.developer.healthkit.access",
+          "com.apple.security.application-groups"
+        ],
+        "privacy": {
+          "NSBluetoothAlwaysUsageDescription": "NOOP connects directly to your WHOOP strap over Bluetooth to read heart rate, R-R intervals, battery, and sensor data locally on your iPhone. Nothing leaves your device.",
+          "NSHealthShareUsageDescription": "NOOP reads your own Apple Health data on-device to compute recovery, strain, and sleep. Nothing leaves your device.",
+          "NSHealthUpdateUsageDescription": "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it.",
+          "NSLocationWhenInUseUsageDescription": "NOOP records your route during an outdoor workout to show distance, pace, and a map, and keeps recording while the screen is off. The route stays on your device. Nothing leaves it.",
+          "NSMotionUsageDescription": "NOOP reads your iPhone's step count for a walking or running workout to show steps in the activity summary. It stays on your device. Nothing leaves it."
+        }
+      },
+      "version": "12.1.1",
+      "buildVersion": "440",
+      "versionDate": "2026-10-30",
+      "versionDescription": "NOOP Hydration Coach iOS build, commit cf9e28b7acb3716f9793cc70b253bd42760ce838. Sign with AltStore Classic or SideStore. Uses NOOP's existing app identifier, so it can replace an installed NOOP; back up existing data before switching. Wake time stays in NOOP's Alarms screen. The shared WHOOP 4.0 alarm supports a wake-to-hydration-to-bedtime routine; following alarms require Bluetooth and iOS background event delivery. Physical haptics remain unverified.",
+      "downloadURL": "https://github.com/steutersimon-a11y/noop_w_hydrationcoach_v1/releases/download/hydration-coach-cf9e28b7acb3/NOOP-Hydration-Coach-cf9e28b7acb3.ipa",
+      "size": 22171134,
+      "minOSVersion": "17.0"
+    }
+  ],
+  "news": []
+}

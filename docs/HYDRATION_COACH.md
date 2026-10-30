@@ -75,9 +75,28 @@ and a complete locked-phone day have not been measured by this cloud build.
 
 The iOS sideload workflow builds a device Release IPA, strips the watch app, retains the widget,
 anonymizes builder paths and adds replaceable ad-hoc capability signatures. AltStore Classic
-or SideStore supplies Apple-ID signing. Successful commits publish an isolated
-`hydration-coach-<commit>` prerelease containing the IPA, SHA256SUMS and
-`altstore-hydration-source.json`. Feed version, size and platform come from the actual archive.
+or SideStore supplies Apple-ID signing. Successful commits publish a versioned
+`hydration-coach-<commit>` prerelease containing the IPA, SHA256SUMS and a source snapshot.
+Feed version, size and platform come from the actual archive.
+
+The existing source URL is a persistent update channel:
+
+```text
+https://github.com/steutersimon-a11y/noop_w_hydrationcoach_v1/releases/download/hydration-coach-36616a7b30d4/altstore-hydration-source.json
+```
+
+Its address, source identifier and application bundle identifier stay unchanged. New verified
+releases are added to its versions list; AltStore can offer an update to the installed app.
+The source previously published under `hydration-coach-cf9e28b7acb3` is maintained too, so
+users who added that address can keep it. New release notes advertise the original channel
+rather than asking users to add a new source for every build. Refresh the source in AltStore
+and select Update in My Apps; no app/source deletion is needed.
+
+`Tools/ios_altstore_channels.py` validates release/source digests and stages updates before
+publishing the JSON and its SHA256SUMS entry. Channel identifiers are preserved, version
+history is retained and an older build cannot roll the channel back. Archived IPA assets
+and release tags stay unchanged; the source JSON is intentionally updated in place. The two
+channel-hosting releases must remain editable and must not be deleted.
 
 Keep the widget enabled when signing. The bundle identifier is preserved, so back up NOOP data
 before replacing an installation. AltStore Classic requires a reachable AltServer to install
