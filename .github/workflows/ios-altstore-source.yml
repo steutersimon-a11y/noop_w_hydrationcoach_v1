@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Published iPhone release to advertise
+        description: Published iPhone release to advertise (empty selects the newest release)
         required: false
-        default: hydration-coach-cf9e28b7acb3
+        default: ''
         type: string
   pull_request:
     branches: [main]
@@ -32,7 +32,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag || 'hydration-coach-cf9e28b7acb3' }}
+      REQUESTED_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -77,7 +77,21 @@ jobs:
       - name: Test channel updates
         working-directory: Tools
         run: python3 -m unittest -v test_ios_altstore_channels test_ios_sideload_source
+      - name: Select the current published iPhone release
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="$REQUESTED_TAG"
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq \
+              '[.[] | select(.draft == false) | select(.tag_name | startswith("hydration-coach-")) | select(any(.assets[]; .name | startswith("NOOP-Hydration-Coach-") and endswith(".ipa")))][0].tag_name')
+          fi
+          test -n "$RELEASE_TAG" && test "$RELEASE_TAG" != null
+          printf 'tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
       - name: Publish updates through existing source identities
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: >-
           python3 Tools/ios_altstore_channels.py
           --repository "$GITHUB_REPOSITORY" --release-tag "$RELEASE_TAG"
